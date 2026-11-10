@@ -1,0 +1,181 @@
+---
+title: "Practical Estimation of Diversity from Abundance Data"
+# Output formats
+format:
+  stylisharticle-pdf:
+    keep-tex: true
+    # Color example, see "Text color"
+    header-includes:
+      \definecolor{grey}{RGB}{191, 191, 191}
+  stylisharticle-html:
+    # Color example, see "Text color"
+    css: colors.css
+# Authors (https://quarto.org/docs/journals/authors.html#author-schema)
+author:
+  - name: Eric Marcon
+    orcid: 0000-0002-5249-321X
+    email: eric.marcon@agroparistech.fr
+    attributes:
+      corresponding: true
+    url: https://ericmarcon.github.io/
+    affiliations:
+      - ref: APT
+      - ref: Amap
+affiliations:
+  - name: AgroParisTech
+    id: APT
+    city: Montpellier
+    state: France
+  - name: AMAP, CIRAD, CNRS, INRAE, IRD, Univ Montpellier
+    id: Amap
+    number: 2
+    city: Montpellier
+    country: France
+# Abstract and Keywords
+abstract: |
+  Measuring biodiversity requires empirical techniques to effectively estimate it from real data.
+  The well-known underestimation of the number of species applies to low orders of diversity in general.
+  The different ways to address this issue are reviewed here and nine estimators, including three new ones, are tested on geometric and lognormal distributions that represent realistic, hyper-diverse communities.
+  The best two estimators allow a good estimation of diversity of orders over 0.5, even when the sampling effort is low.
+  Criteria to choose the estimator are provided with the necessary code in the divent package for R.
+keywords: [biodiversity, entropy, estimation]
+# Bibliography
+reference-section-title: References
+bibliography: references.bib
+# Language
+lang: en-GB
+# Code options 
+# https://quarto.org/docs/computations/execution-options.html
+execute:
+  # show code chunk output
+  include: true
+  # Show the code in the output
+  echo: false
+  # Show messages
+  message: false
+  # Show warnings
+  warning: false
+  # Cache code results
+  cache: false
+# Template specific
+journalinfo: "Hal 01212435"
+archive: "DOI: xxx/xx"
+keywordlabel: Keywords
+corrauthorlabel: Corresponding Author
+---
+
+```{r}
+#| label: Options
+#| include: false
+### Customized R options for this document
+# Delete this chunk if you don't use R
+
+# Necessary packages. Add all packages used in the code here.
+packages_required <- c(
+  # R tools, do not modify
+  "knitr",   # to run the code chunks
+  "formatR", # if tidy = TRUE below
+  # Add specific packages here
+  "cowplot",
+  "divent", 
+  "gridExtra", 
+  "lmodel2",
+  "tidyverse"
+)
+# Already installed?
+packages_installed <- vapply(
+  packages_required, 
+  FUN = requireNamespace, 
+  FUN.VALUE = TRUE, 
+  quietly = TRUE
+) 
+# Install missing packages
+install.packages(
+  names(packages_installed)[!packages_installed],
+  repos = "https://cran.rstudio.com/",
+  quiet = TRUE
+)
+
+# Allow size='small' or any valid Latex font size in chunk options
+def.chunk.hook <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(
+  chunk = function(x, options) {
+    x <- def.chunk.hook(x, options)
+    ifelse(
+      options$size == "normalsize", 
+      yes = x,
+      no = paste0("\n \\", options$size, "\n\n", x, "\n\n \\normalsize")
+    )
+  }
+)
+
+# knitr options (https://yihui.org/knitr/options/)
+knitr::opts_chunk$set(
+  # Code chunk automatic format if tidy is TRUE
+  tidy = TRUE, 
+  # Tidy code options: remove blank lines and cut lines after 50 characters
+  tidy.opts = list(blank = FALSE, width.cutoff = 50),
+  # Font size in PDF output
+  size = "scriptsize", 
+  # Select PDF figures in PDF output if PDF file exists beside PNG file
+  knitr.graphics.auto_pdf = TRUE
+)
+# Text width of R functions output
+options(width = 50)
+
+# ggplot style
+library("tidyverse")
+# Function to call in each chunk that produces a figure
+ggtheme_set <- function() {
+  theme_set(theme_bw())
+  theme_update(
+    panel.background = element_rect(fill = "transparent", colour = NA),
+    plot.background = element_rect(fill = "transparent", colour = NA)
+  )
+}
+knitr::opts_chunk$set(dev.args = list(bg = "transparent"))
+
+# Random seed
+set.seed(973)
+```
+
+# Introduction
+
+Measuring biodiversity requires both a robust theoretical framework [@Patil1982] and empirical techniques to effectively estimate the theoretical variables with real data [@Beck2010].
+In this paper I focus on species-neutral measures of diversity based on HCDT entropy [@Havrda1967; @Daroczy1970; @Tsallis1988] that fulfill the first requirement.
+Entropy measures the average surprise brought by observing individuals of a community.
+Surprise is a decreasing function of probability dropping to 0 when probability is 1.
+HCDT entropy uses a parameterized surprise function that is the deformed logarithm of order $q$ of the reciprocal of probability [@Marcon2014a].
+Traditional measures of diversity, namely the number of species as well as Shannon's and Simpson's indices, are special cases of the HCDT entropy for values of $q$ equal to 0, 1 and 2.
+HCDT entropy should be transformed into Hill numbers [@Hill1973] for better interpretation of the value of diversity as an effective number of species [@Jost2006].
+Hill numbers are simply the deformed exponential of HCDT entropy [@Marcon2014a].
+Rather than focusing on a single value of $q$, a profile of diversity, i.e. a plot of diversity against $q$, can be built [@Tothmeresz1995].
+Low values of $q$ (starting from 0) give much importance to rare species, whilst higher values (usually up to 2) focus on abundant species.
+Negative values of $q$ are not used because of poor mathematical properties of their entropy [@Beck2009], and values over 2 generally bring little more information.
+Ordering communities in terms of diversity requires that their profile do not cross [@Tothmeresz1995]; else, declaring a community more diverse than another only holds for a range of values of $q$ reflecting the importance given to rare or frequent species [@Lande2000].
+
+To plot those profiles, diversity must be estimated from the data.
+Estimation bias [following the terminology of @Dauby2012] is a well-known issue [@Marcon2014a].
+Real data are almost always samples of larger communities, so some species may have been missed.
+The induced bias on the Simpson entropy is smaller than on the Shannon entropy because the former assigns lower weights to rare species, i.e. the sampling bias is even more important when $q$ decreases.
+Another estimation bias has been widely studied by physicists who generally consider that all species of a given community are known and their probabilities quantified.
+Their main issue is not at all missing species but the non-linearity of entropy measures [see @Bonachela2008 for a short review].
+Estimating probabilities at power $q>0$ by the power of their estimator is an important source of underestimation of entropy.
+The need for corrections has generated a considerable literature in ecological statistics and statistical physics.
+
+This paper tests the performance of the state-of-the-art estimators when applied to the kind of data ecologists have to deal with.
+It starts with simulated distributions that have the advantage of being easily manipulated to generate various sampling intensities and evaluate the bias and root mean square error (RMSE) of the estimators.
+The classical models of the literature, namely the lognormal and the geometric distributions are addressed.
+The lognormal distribution describes, at least roughly, many hyper-diverse ecosystems even though the link between its statistical success and the underlying ecological mechanisms is poorly documented [@Tokeshi1993].
+The geometric distribution is a far more difficult case because it is very uneven: the frequency of rare species is several orders of magnitude smaller than that of the frequent ones, making it impossible to observe with reasonable sampling effort [@Haegeman2013].
+The best-known and best-performing estimators, including three new ones, are applied to those distributions and two actual forest data sets.
+The purpose of the paper is to provide recommendations about the estimation technique to choose when facing different types of data and draw general conclusions about the possible accuracy of diversity estimation.
+
+Phylogenetic entropy is the sum of HCDT entropy along an ultrametric tree [@Marcon2014b] so estimating it reduces to estimating HCDT entropy.
+Phylogenetic diversity is then obtained as the deformed exponential of phyloentropy.
+In short, estimating phylodiversity relies on the methods presented here so the paper will focus on species-neutral diversity for clarity.
+
+All analyses are made whith the package *entropart* [@Marcon2014c] for R [@R].
+This paper comes with a Shiny application available on GitHub[^1] to simulate communities and estimate their diversity.
+
+[^1]: https://github.com/EricMarcon/estimation
