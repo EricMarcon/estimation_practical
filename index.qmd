@@ -35,7 +35,7 @@ affiliations:
 abstract: |
   Measuring biodiversity requires empirical techniques to effectively estimate it from real data.
   The well-known underestimation of the number of species applies to low orders of diversity in general.
-  The different ways to address this issue are reviewed here and nine estimators, including three new ones, are tested on geometric and lognormal distributions that represent realistic, hyper-diverse communities.
+  The different ways to address this issue are reviewed here and nine estimators, including three new ones, are tested on geometric and log-normal distributions that represent realistic, hyper-diverse communities.
   The best two estimators allow a good estimation of diversity of orders over 0.5, even when the sampling effort is low.
   Criteria to choose the estimator are provided with the necessary code in the divent package for R.
 keywords: [biodiversity, entropy, estimation]
@@ -165,8 +165,8 @@ The need for corrections has generated a considerable literature in ecological s
 
 This paper tests the performance of the state-of-the-art estimators when applied to the kind of data ecologists have to deal with.
 It starts with simulated distributions that have the advantage of being easily manipulated to generate various sampling intensities and evaluate the bias and root mean square error (RMSE) of the estimators.
-The classical models of the literature, namely the lognormal and the geometric distributions are addressed.
-The lognormal distribution describes, at least roughly, many hyper-diverse ecosystems even though the link between its statistical success and the underlying ecological mechanisms is poorly documented [@Tokeshi1993].
+The classical models of the literature, namely the log-normal and the geometric distributions are addressed.
+The log-normal distribution describes, at least roughly, many hyper-diverse ecosystems even though the link between its statistical success and the underlying ecological mechanisms is poorly documented [@Tokeshi1993].
 The geometric distribution is a far more difficult case because it is very uneven: the frequency of rare species is several orders of magnitude smaller than that of the frequent ones, making it impossible to observe with reasonable sampling effort [@Haegeman2013].
 The best-known and best-performing estimators, including three new ones, are applied to those distributions and two actual forest data sets.
 The purpose of the paper is to provide recommendations about the estimation technique to choose when facing different types of data and draw general conclusions about the possible accuracy of diversity estimation.
@@ -402,50 +402,77 @@ The correct process consists of evaluating entropy with its confidence interval 
 
 ## Typical distributions
 
-```{r parameters}
-Distributions <- c("lnorm", "geom")
-Richness <- 300                   # c(300, 600)
-SampleSizes <- 1000               # c(200, 500, 1000, 5000)
-Corrections <- c("UnveilJ", "UnveiliC", "ChaoJost", "UnveilC", "GenCov", "ChaoShen", "Grassberger", "ZhangGrabchak", "None")
-q.seq <- c(seq(0, .1, 0.025), .15, seq(.2, .6, 0.1))
-NumberOfSimulations <- 10
-Alpha <- 0.05
+```{r}
+#| label: parameters
+distributions <- c("lnorm", "geom")
+richnesses <- 300                 # c(300, 600)
+sample_sizes <- 1000              # c(200, 500, 1000, 5000)
+estimators <- c(
+  "UnveilJ", 
+  "UnveiliC", 
+  "ChaoJost",
+  "UnveilC",
+  "GenCov", 
+  "ChaoShen", 
+  "Grassberger", 
+  "ZhangGrabchak", 
+  "naive"
+)
+orders <- c(
+  seq(from = 0, to = 0.1, by = 0.025), 
+  0.15, 
+  seq(from = 0.2, to = 0.6, by = 0.1)
+)
+n_simulations <- 10               # 1000
+alpha <- 0.05
+# log-normal distributions: sd similar to BCI
+sd_lnorm  <- 1.8
+# Geometric distributions: each species takes 10% of the remaining resources 
+prob_geom  <- 0.1
 ```
 
-```{r generate_communities}
-# Log normal: sd similar to BCI
-sdlog <- 2
-# Geometric: each species takes 10% of the remaining resources 
-prob <- .1
-
-# rDistribution generates a probability distribution
-library("entropart")
-rDistribution <- function (Distribution, S)
-{
+```{r}
+#| label: generate_communities
+library("divent")
+# rdistribution generates a probability distribution
+rdistribution <- function(
+    distribution, 
+    species_number,
+    sd_lnorm,
+    prob_geom) {
   # Generate the distribution
-  Ps <- switch(Distribution,
-               lnorm = (rlnorm(S, 0, sdlog) -> Ns)/sum(Ns),
-               geom = prob/(1-(1-prob)^S)*(1-prob)^(0:(S-1))
+  prob <- switch(
+    distribution,
+    lnorm = (rlnorm(species_number, meanlog = 0, sdlog = sd_lnorm) -> n) / 
+      sum(n),
+    geom = prob_geom /
+      (1 - (1 - prob_geom)^species_number) * 
+      (1 - prob_geom)^(0:(species_number - 1))
   )
-  return(as.ProbaVector(Ps))
+  # Return a probabilities object (package divent)
+  as_probabilities(prob) %>% 
+    mutate(site = paste0(distribution, richness))
 }
 
 # Generate distributions
-for (Distribution in Distributions)
+for (distribution in distributions)
 {
-  for (S in Richness) {
+  for (richness in richnesses) {
     # Variable names are e.g. 
-    # Pgeom300 for probabilities of a geometric distribution of 300 species
-    assign(paste("P", Distribution, S, sep=""), rDistribution(Distribution, S))
+    # geom300 for probabilities of a geometric distribution of 300 species
+    assign(
+      paste0(distribution, richness), 
+      rdistribution(distribution, richness, sd_lnorm, prob_geom)
+    )
   }
 }
 ```
 
 Comparing the performance of estimators requires simulations of realistic communities.
 The focus is put on two opposed models making sense in ecology.
-The lognormal distribution [@Preston1948] fits well species-rich communities for several reasons, including populations dynamics [@Engen1996], niche apportionment [@Bulmer1974], or even statistical physics arguments [@Pueyo2007; @Dewar2008].
+The log-normal distribution [@Preston1948] fits well species-rich communities for several reasons, including populations dynamics [@Engen1996], niche apportionment [@Bulmer1974], or even statistical physics arguments [@Pueyo2007; @Dewar2008].
 It is often well fitted empirically [@Tokeshi1990] even though it has been questioned theoretically [@Williamson2005].
-The local community distribution according to the neutral theory [@Volkov2003] is not lognormal but departs from it very moderately.
+The local community distribution according to the neutral theory [@Volkov2003] is not log-normal but departs from it very moderately.
 The logarithm of the species probabilities follows a Gaussian distribution.
 
 The geometric series model [@Motomura1932; @Whittaker1972] generates far more uneven species distributions.
@@ -453,30 +480,20 @@ In this model, the first species is represented by a part $p$ of the total resou
 The second one has the same part $p$ of the remaining resources, and so on.
 Finally, probabilities are normalized to be proportional to the resources taken.
 
-(ref:SpeciesDistributions) Rank-Abundance curves of 300 species following a lognormal (green, top curve) or a geometric distribution (red, straight line). The solid lines are the fitted models.
-
-```{r SpeciesDistributions, fig.cap="(ref:SpeciesDistributions)"}
-tibble(
-  Rank = seq_len(300), 
-  geom=sort(as.numeric(Pgeom300), decreasing=TRUE),
-  lnorm=sort(as.numeric(Plnorm300), decreasing=TRUE)
-  ) %>% 
-  pivot_longer(!Rank, names_to = "distribution", values_to = "value") ->
-  distributions
-fitted_geom <- RACgeom(Pgeom300)$Abundance
-fitted_ln <- RAClnorm(Plnorm300)$Abundance
-tibble(Rank = seq_len(300), geom=fitted_geom, lnorm=fitted_ln) %>% 
-  pivot_longer(!Rank, names_to = "distribution", values_to = "fitted") %>% 
-  inner_join(distributions) %>% 
-  ggplot() +
-  geom_point(aes(x=Rank, y=value)) +
-  geom_line(aes(x=Rank, y=fitted, color=distribution)) +
-  scale_y_log10() +
+::: {#fig-whittaker}
+```{r}
+#| label: whittaker
+ggtheme_set()
+bind_rows(geom300, lnorm300) %>% 
+  autoplot() +
   theme(legend.position = "none")
 ```
 
+Rank-Abundance curves of 300 species following a log-normal (blue, top curve) or a geometric distribution (red, straight line)
+:::
+
 Artificial communities following those distributions are generated.
-Figure \@ref(fig:SpeciesDistributions) presents a lognormal one, with log-standard-deviation equal to 2 (typical of the distribution of tree species in a rainforest) and a geometric distribution with parameter $p=0.1$.
+@fig-whittaker presents a log-normal one, with log-standard-deviation equal to 1.8 (typical of the distribution of tree species in a rainforest) and a geometric distribution with parameter $p=0.1$.
 Both contain 300 species.
 
 ## Evaluation of the performance of estimators
@@ -495,43 +512,62 @@ Sample sizes are between 200 and 5000 individuals to cover a range from obvious 
 
 ## Sample coverage
 
-(ref:CAll) Estimated vs real sample coverage of simulated samples of a lognormal (a) or geometric (b) distribution of 300 species. Sample sizes are between 200 and 5000 individuals. The line represents the fit of a model II (Major Axis method) linear regression. a) Lognormal distribution: The estimated sample coverage is 0.991 times the real one plus 0.009, with an $R^2$ value around 94%. b) Geometric distribution: The estimated sample coverage is 1.046 times the real one minus 0.046, with an $R^2$ value around 69%.
-
-```{r CAll, fig.cap="(ref:CAll)", fig.env='figure*', out.extra="", fig.asp=.5}
-library("gridExtra")
-
-# Compare Estimated and actual sample coverages
-ggC <- function(Ps, SampleSizes) {
-  RealC <- EstimC  <- numeric()
-  for (Size in SampleSizes) {
-    MCSim <- rCommunity(2, size=Size, NorP=Ps)
-    RealC <- c(RealC, colSums(Ps * (MCSim$Nsi>0)))
-    EstimC <- c(EstimC, MCSim$SampleCoverage.communities)
-  }
-  return(
-    ggplot(data.frame(RealC, EstimC)) +
-      geom_point(aes(x=RealC, y=EstimC)) +
-      geom_abline(slope=1, intercept=0, col="red") +
-      labs(x = "Actual Sample Coverage", y="Estimated Sample Coverage")
+::: {#fig-C_all fig-env="figure*"}
+```{r}
+#| label: C_all
+# Compare estimated and actual sample coverages
+ggC <- function(probabilities, sizes) {
+  prob <- as.numeric(probabilities)
+  the_coverage <- matrix(0, nrow = length(sizes), ncol = 2)
+  for (i in seq_along(sizes)) {
+    the_community <- as.numeric(
+      rcommunity(
+        n = 1, 
+        size  = sizes[i], 
+        prob = prob
+      )
+    ) 
+    the_coverage[i, ] <- c(
+      # Real coverage
+      sum(prob * (the_community > 0)),
+      #Estimated coverage
+      coverage(the_community, as_numeric = TRUE)
     )
+  }
+  # Return a ggplot
+  the_coverage %>% 
+    as_tibble() %>% 
+    set_names(c("Real", "Estimated")) %>% 
+    ggplot() +
+    geom_point(aes(x = Real, y = Estimated)) +
+    geom_abline(slope = 1, intercept = 0, col = "red") +
+    labs(x = "Actual Sample Coverage", y = "Estimated Sample Coverage")
 }
 
+library("gridExtra")
 grid.arrange(
-  ggC(Plnorm300, 200:5000)  + labs(tag = "a"),
-  ggC(Pgeom300, 200:5000) + labs(tag = "b"), 
+  ggC(lnorm300, 200:5000)  + labs(tag = "a"),
+  ggC(geom300, 200:5000) + labs(tag = "b"), 
   nrow = 1
-  )
+)
 ```
+
+Estimated *vs* real sample coverage of simulated samples of a log-normal (a) or geometric (b) distribution of 300 species.
+Sample sizes are between 200 and 5000 individuals.
+The line represents the fit of a model II (Major Axis method) linear regression.
+a) log-normal distribution: The estimated sample coverage is 0.991 times the real one plus 0.009, with an $R^2$ value around 94%.
+b) Geometric distribution: The estimated sample coverage is 1.046 times the real one minus 0.046, with an $R^2$ value around 69%.
+:::
 
 Performances of the estimator of sample coverage are evaluated first.
 2 communities of each size between 200 and 5000 individuals were sampled in each typical distribution.
-The real and estimated sample coverages are compared on figure \@ref(fig:CAll).
-The estimation of sample coverage is very efficient.
-A model II linear regression [@Legendre2014] validated the accuracy of the estimation.
+The real and estimated sample coverages are compared on @fig-C_all. The estimation of sample coverage is very efficient.
+A model II linear regression [@Legendre2014] validates the accuracy of the estimation.
 
 ## Entropy and diversity
 
-```{r divprofiles}
+```{r}
+#| label: divprofiles
 # Function to build the confidence envelope of the estimation
 CommunityProfileBySize <- function(FUN, Ps, q.seq, Size, NumberOfSimulations, Correction, Alpha) 
 {
@@ -583,7 +619,7 @@ for (Distribution in Distributions) {
         # Calculate RMSE
         Env$RMSE <- sqrt((Env$Real-Env$y)^2 + Env$var)/Env$Real
         # Variable names are e.g. 
-        # Elnorm300_1000UnveilJ for the entropy profile of a lognormal distribution 
+        # Elnorm300_1000UnveilJ for the entropy profile of a log-normal distribution 
         # of 300 species sampled by 1000 individuals and estimated by UnveilJ
         assign(paste("E", Distribution, S, "_", Size, Correction, sep=""), Env)
       }
@@ -592,7 +628,7 @@ for (Distribution in Distributions) {
 }
 ```
 
-The root mean square error of the estimators is shown on figure \@ref(fig:RMSE) for the lognormal and the geometric distributions with 300 species when 1000 individuals are sampled, a typical tropical forest inventory of trees.
+The root mean square error of the estimators is shown on figure \@ref(fig:RMSE) for the log-normal and the geometric distributions with 300 species when 1000 individuals are sampled, a typical tropical forest inventory of trees.
 
 Unsurprisingly, the plug-in estimator is severely biased and has the poorest results in the tests.
 The Chao-Jost estimator systematically outperforms the Zhang-Grabchak estimator (which actually performs little better than the plugin-estimator here) by construction.
@@ -609,10 +645,10 @@ Results are consistent whatever the model.
 The general pattern is a poor estimation of low orders of diversity, and a quite accurate estimation of high orders, as previously shown by @Haegeman2013.
 The RMSE varies a lot according to the model.
 
-(ref:RMSE) Estimated relative RMSE of the estimators of diversity based on 1000 samples of 1000 individuals of each typical distribution: lognormal (a) and geometric (b) of 300 species. The RMSE is normalized by the actual diversity. It is quite high for low orders of diversity, especially for the geometric distribution. Values of $q$ over 0.6 are not shown because all estimators perform similarly well. The legend lists the estimators in the increasing order of RMSE for $q>0.1$, where the estimator with the lowest RMSE is the jackknife-unveiled one, closely followed by the iChao-unveiled and Chao-Jost. Close to $q=0$, the jackknife-unveiled estimator has a higher variance making it the least reliable estimator.
+(ref:RMSE) Estimated relative RMSE of the estimators of diversity based on 1000 samples of 1000 individuals of each typical distribution: log-normal (a) and geometric (b) of 300 species. The RMSE is normalized by the actual diversity. It is quite high for low orders of diversity, especially for the geometric distribution. Values of $q$ over 0.6 are not shown because all estimators perform similarly well. The legend lists the estimators in the increasing order of RMSE for $q>0.1$, where the estimator with the lowest RMSE is the jackknife-unveiled one, closely followed by the iChao-unveiled and Chao-Jost. Close to $q=0$, the jackknife-unveiled estimator has a higher variance making it the least reliable estimator.
 
 ```{r RMSE, fig.cap="(ref:RMSE)", fig.env='figure*', out.extra="", fig.asp=.4}
-# Lognormal
+# log-normal
 RMSE <- tibble(q=q.seq)
 for (Correction in Corrections) {
   RMSE <- add_column(
@@ -654,9 +690,9 @@ grid.arrange(
 ```
 
 The discussion will focus on the best two estimators: Chao-Jost and jackknife-unveiled, ignoring the iChao-unveiled estimator which takes place between them but is too similar to the jackknife-unveiled to bring decisive arguments for the discussion.
-Figure \@ref(fig:Profiles) shows their profiles for a 1000-individual sample of a lognormal distribution of 300 species, with their confidence intervals.
+Figure \@ref(fig:Profiles) shows their profiles for a 1000-individual sample of a log-normal distribution of 300 species, with their confidence intervals.
 
-(ref:Profiles) Diversity profiles estimated from 1000 random samples of 1000 individuals from a lognormal community of 300 species. The black line represents the real diversity (starting from $^{0}{D} \approx 300$). The jackknife-unveiled estimator is plotted by the red line ($^{0}{\hat{D}} \approx 250$). Its confidence interval (red shade) is very wide. The Chao-Jost estimator (blue line: $^{0}{\hat{D}} \approx 200$) is more biased downward but its confidence interval (blue shade) is much smaller.
+(ref:Profiles) Diversity profiles estimated from 1000 random samples of 1000 individuals from a log-normal community of 300 species. The black line represents the real diversity (starting from $^{0}{D} \approx 300$). The jackknife-unveiled estimator is plotted by the red line ($^{0}{\hat{D}} \approx 250$). Its confidence interval (red shade) is very wide. The Chao-Jost estimator (blue line: $^{0}{\hat{D}} \approx 200$) is more biased downward but its confidence interval (blue shade) is much smaller.
 
 ```{r Profiles, fig.cap="(ref:Profiles)"}
 profile_ChaoJost <- tibble(
@@ -687,8 +723,8 @@ ggplot() +
 # Discussion
 
 The underlying distribution of species is the most important determinant of the success of diversity estimation: the estimation bias of heavy-tailed distributions decays more slowly when the sample size is increased [@Zhang2013].
-Estimating the low-order diversity of a sample from a geometric distribution is all but impossible [@Haegeman2013] but the low-order diversity of lognormal communities can be estimated meaningfully when the sample size is sufficient.
-Empirically, it is not possible to discriminate a severely-censured geometric distribution and a lognormal one [@Tokeshi1993]: both models fit well since most of the difference is contained by the unobserved tails of the distributions.
+Estimating the low-order diversity of a sample from a geometric distribution is all but impossible [@Haegeman2013] but the low-order diversity of log-normal communities can be estimated meaningfully when the sample size is sufficient.
+Empirically, it is not possible to discriminate a severely-censured geometric distribution and a log-normal one [@Tokeshi1993]: both models fit well since most of the difference is contained by the unobserved tails of the distributions.
 So, theoretical, ecological arguments about the actual distribution of the community are necessary to decide whether an estimation of diversity is reliable.
 
 Diversity of order over 0.5 is pretty well estimated in the context of this paper.
@@ -697,8 +733,8 @@ Haegeman *et al.* showed that this remains true for $q \geq 1$, even when geomet
 ## The sample coverage is not always the good indicator of the quality of estimation
 
 The sample coverage can not be used as a proxy for how much an estimate of diversity can be relied upon.
-At the same sampling effort, the sample coverage appears to be higher for the geometric distribution: far more species are not sampled than in a lognormal distribution, but their total probability is smaller.
-For example, samples of 200 individuals drawn in 300-species geometric and lognormal communities yield an average estimation of 54 and 149 species by the jackknife-unveiled estimator, but the respective sample coverages are over 95% for the geometric distribution versus around 81% for the lognormal one.
+At the same sampling effort, the sample coverage appears to be higher for the geometric distribution: far more species are not sampled than in a log-normal distribution, but their total probability is smaller.
+For example, samples of 200 individuals drawn in 300-species geometric and log-normal communities yield an average estimation of 54 and 149 species by the jackknife-unveiled estimator, but the respective sample coverages are over 95% for the geometric distribution versus around 81% for the log-normal one.
 The estimation bias of the geometric distribution is thus much greater for low orders of diversity even though the sample coverage is higher.
 
 @Chao2012b argue in favor of the sample coverage as a better measure of the sampling effort than the sample size: this must be understood as long as the underlying distribution of communities is the same.
@@ -707,7 +743,7 @@ Then, standardizing the sampling effort by the sample coverage is pertinent.
 ## Comparing the diversity of real communities with different distributions remains intractable
 
 When the number of species of the theoretical distributions is doubled, everything else equal, the sampling bias increases.
-With the same sampling effort, the coverage of the lognormal distribution decreases.
+With the same sampling effort, the coverage of the log-normal distribution decreases.
 Doubling the effort brings both the sample coverage and the bias back to their previous level, with a reduced variance.
 These operations can be reproduced with the Shiny application provided with the paper.
 
@@ -752,7 +788,7 @@ autoplot(DPBCI)
 
 The diversity of two real forest plots is estimated now.
 The first case is Barro Colorado Island's 50-ha plot of tropical forest, whose inventory data of trees over 10\~cm diameter at breast height are available in the package *vegan* [@Oksanen2012] for R.
-225 species have been sampled, with a quite good fit to a lognormal distribution.
+225 species have been sampled, with a quite good fit to a log-normal distribution.
 The sample size is over 20000 individuals, the sample coverage is over 99.9%.
 Estimating the number of species with the Chao1 or the jackknife 1 estimators gives very similar results: 239 and 244 species.
 This is an unusually large dataset, whose diversity estimation (Figure \@ref(fig:BCIProfile)) is quite easy.
