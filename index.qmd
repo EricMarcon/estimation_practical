@@ -441,16 +441,17 @@ rdistribution <- function(
     sd_lnorm,
     prob_geom) {
   # Generate the distribution
-  prob <- switch(
+  switch(
     distribution,
     lnorm = (rlnorm(species_number, meanlog = 0, sdlog = sd_lnorm) -> n) / 
       sum(n),
     geom = prob_geom /
       (1 - (1 - prob_geom)^species_number) * 
       (1 - prob_geom)^(0:(species_number - 1))
-  )
-  # Return a probabilities object (package divent)
-  as_probabilities(prob) %>% 
+  ) %>% 
+    # Return a probabilities object (package divent)
+    as_probabilities() %>% 
+    # Name it
     mutate(site = paste0(distribution, richness))
 }
 
@@ -459,9 +460,9 @@ for (distribution in distributions)
 {
   for (richness in richnesses) {
     # Variable names are e.g. 
-    # geom300 for probabilities of a geometric distribution of 300 species
+    # p_geom300 for probabilities of a geometric distribution of 300 species
     assign(
-      paste0(distribution, richness), 
+      paste0("p_", distribution, richness), 
       rdistribution(distribution, richness, sd_lnorm, prob_geom)
     )
   }
@@ -484,7 +485,7 @@ Finally, probabilities are normalized to be proportional to the resources taken.
 ```{r}
 #| label: whittaker
 ggtheme_set()
-bind_rows(geom300, lnorm300) %>% 
+bind_rows(p_geom300, p_lnorm300) %>% 
   autoplot() +
   theme(legend.position = "none")
 ```
@@ -546,8 +547,8 @@ ggC <- function(probabilities, sizes) {
 
 library("gridExtra")
 grid.arrange(
-  ggC(lnorm300, 200:5000)  + labs(tag = "a"),
-  ggC(geom300, 200:5000) + labs(tag = "b"), 
+  ggC(p_lnorm300, 200:5000)  + labs(tag = "a"),
+  ggC(p_geom300, 200:5000) + labs(tag = "b"), 
   nrow = 1
 )
 ```
@@ -561,72 +562,12 @@ b) Geometric distribution: The estimated sample coverage is 1.046 times the real
 
 Performances of the estimator of sample coverage are evaluated first.
 2 communities of each size between 200 and 5000 individuals were sampled in each typical distribution.
-The real and estimated sample coverages are compared on @fig-C_all. The estimation of sample coverage is very efficient.
+The real and estimated sample coverages are compared on @fig-C_all.
+The estimation of sample coverage is very efficient.
 A model II linear regression [@Legendre2014] validates the accuracy of the estimation.
 
 ## Entropy and diversity
 
-```{r}
-#| label: divprofiles
-# Function to build the confidence envelope of the estimation
-CommunityProfileBySize <- function(FUN, Ps, q.seq, Size, NumberOfSimulations, Correction, Alpha) 
-{
-  # Create a MetaCommunity made of simulated communities
-  MCSim <- rCommunity(NumberOfSimulations, size=Size, NorP=Ps, CheckArguments = FALSE)
-  if (interactive()) ProgressBar <- txtProgressBar(min=0, max=NumberOfSimulations)
-  Sims <- matrix(nrow=NumberOfSimulations, ncol=length(q.seq))
-  # Loops are required for the progress bar, instead of:
-  # Sims <- apply(MCSim$Nsi, 2, function(Nsi) CommunityProfile(FUN, Nsi, q.seq, ...)$y)
-  for (i in 1:NumberOfSimulations) {
-    Sims[i, ] <- sapply(q.seq, function(q) FUN(MCSim$Nsi[, i], q, Correction=Correction, CheckArguments = FALSE))
-    if (interactive()) setTxtProgressBar(ProgressBar, i)
-  }
-  Means <- apply(Sims, 2, mean)
-  Vars <- apply(Sims, 2, var)
-  
-  # Quantiles of simulations for each q
-  EstEnvelope <- apply(Sims, 2, quantile, probs = c(Alpha/2, 1-Alpha/2))
-  colnames(EstEnvelope) <- q.seq
-  Profile <- list(x = q.seq,
-                  y = Means,
-                  low = EstEnvelope[1,],
-                  high = EstEnvelope[2,],
-                  var = Vars,
-                  Coverage = MCSim$SampleCoverage.communities
-  )
-  
-  class(Profile) <- "CommunityProfile"
-  return (Profile)
-}
-
-
-# Calculate diversity profiles
-for (Distribution in Distributions) {
-  for (S in Richness) {
-    Ps <- eval(as.name(paste("P", Distribution, S, sep="")))
-    # Real Profile
-    Values <- sapply(q.seq, function(q) Tsallis(Ps, q, CheckArguments = FALSE))
-
-    for (Size in SampleSizes) {
-      for (Correction in Corrections) {
-        # Entropy profile
-        CommunityProfileBySize(bcTsallis, Ps, q.seq, Size, NumberOfSimulations, Correction, Alpha) -> Env
-        # Transform entropy into diversity
-        DEnv <- expq.CommunityProfile(Env)
-        DValues <-  sapply(1:length(q.seq), function(i) expq(Values[i], q.seq[i]))
-        # Save the data
-        Env$Real <- Values
-        # Calculate RMSE
-        Env$RMSE <- sqrt((Env$Real-Env$y)^2 + Env$var)/Env$Real
-        # Variable names are e.g. 
-        # Elnorm300_1000UnveilJ for the entropy profile of a log-normal distribution 
-        # of 300 species sampled by 1000 individuals and estimated by UnveilJ
-        assign(paste("E", Distribution, S, "_", Size, Correction, sep=""), Env)
-      }
-    }
-  }
-}
-```
 
 The root mean square error of the estimators is shown on figure \@ref(fig:RMSE) for the log-normal and the geometric distributions with 300 species when 1000 individuals are sampled, a typical tropical forest inventory of trees.
 
@@ -645,49 +586,145 @@ Results are consistent whatever the model.
 The general pattern is a poor estimation of low orders of diversity, and a quite accurate estimation of high orders, as previously shown by @Haegeman2013.
 The RMSE varies a lot according to the model.
 
-(ref:RMSE) Estimated relative RMSE of the estimators of diversity based on 1000 samples of 1000 individuals of each typical distribution: log-normal (a) and geometric (b) of 300 species. The RMSE is normalized by the actual diversity. It is quite high for low orders of diversity, especially for the geometric distribution. Values of $q$ over 0.6 are not shown because all estimators perform similarly well. The legend lists the estimators in the increasing order of RMSE for $q>0.1$, where the estimator with the lowest RMSE is the jackknife-unveiled one, closely followed by the iChao-unveiled and Chao-Jost. Close to $q=0$, the jackknife-unveiled estimator has a higher variance making it the least reliable estimator.
+::: {#fig-RMSE fig-env="figure*"}
+```{r}
+#| label: RMSE
 
-```{r RMSE, fig.cap="(ref:RMSE)", fig.env='figure*', out.extra="", fig.asp=.4}
-# log-normal
-RMSE <- tibble(q=q.seq)
-for (Correction in Corrections) {
-  RMSE <- add_column(
-    RMSE, 
-    "{Correction}" :=  as.numeric(
-      eval(as.name(paste("Elnorm300_1000", Correction, sep="")))$RMSE
-      )
+library("doFuture")
+# Create a progressor
+library("progressr")
+#progress <- progressor(
+#  steps = n_simulations
+#)
+
+# List all probabilities created above
+ls() %>% 
+  subset(str_starts(., "p_")) ->
+  distributions
+
+# Prepare the output of the loop
+RMSE <- array(
+  0, 
+  dim = c(
+    length(distributions),
+    length(estimators),
+    length(orders)
+  ),
+  dimnames = list(
+    Distribution = distributions,
+    Estimator = estimators,
+    Order = orders
   )
+)
+
+# Sample size
+sample_size <- 1000
+
+for (distribution in distributions) {
+  # Pick a probability distribution
+  distribution %>% 
+    as.name() %>% 
+    eval() ->
+    the_probability
+  
+  # Calculate real diversity
+  the_probability %>% 
+    as.numeric %>% 
+    profile_hill(
+      orders = orders,
+      as_numeric = TRUE,
+      check_arguments = FALSE
+    ) -> 
+    the_diversity 
+    
+  # Create a metacommunity made of simulated communities
+  the_metacommunity <- rcommunity(
+    n = n_simulations,
+    size = sample_size,
+    prob = as.numeric(the_probability)
+  ) %>% 
+  # Store it in a matrix
+  as.matrix() ->
+  the_communities
+
+  for (estimator in estimators) {
+    # Run the simulations according to the plan
+    profile.matrix <- foreach::foreach(
+      simulation = seq_len(n_simulations),
+      .combine = rbind,
+      .options.future = list(seed = TRUE)
+    ) %dofuture% {
+      profile_simulated <- profile_hill(
+        the_communities[simulation, ],
+        orders = orders,
+        estimator = estimator,
+        as_numeric = TRUE,
+        check_arguments = FALSE
+      )
+      # Update the progress bar
+      # progress()
+      # Return the matrix
+      profile_simulated
+    }
+    
+    # Statistics
+    profile_mean <- colMeans(profile.matrix)
+    profile_var <- apply(
+      profile.matrix,
+      MARGIN = 2,
+      FUN = var
+    )
+    profile_rmse <- sqrt((profile_mean - the_diversity)^2 + profile_var) / 
+      the_diversity
+   
+    # Save RMSE
+    RMSE[
+      which(distributions == distribution),
+      which(estimators == estimator),
+    ] <- profile_rmse
+  }
 }
+
+# Prepare the data for ggplot
+RMSE %>% 
+  as.data.frame.table(responseName = "RMSE") %>% 
+  as_tibble() %>% 
+  mutate(Order = as.numeric(Order)) ->
+  RMSE.tibble
+
+# Plots
+ggRMSE <- function(distribution, legend.position = "none") {
+  RMSE.tibble %>% 
+    filter(Distribution == distribution) %>% 
+    ggplot() +
+    geom_line(aes(x = Order, y = RMSE, color = Estimator, lty = Estimator)) +
+    theme(legend.position = legend.position)
+}
+
+# Prepare the plots
+gg_p_lnorm300 <- ggRMSE("p_lnorm300")
+gg_p_geom300 <- ggRMSE("p_geom300")
+# Get the legend from a plot with a legend
 library("cowplot")
-RMSE %>% 
-  pivot_longer(!q, names_to = "Correction", values_to = "value") %>% 
-  ggplot()+
-  geom_line(aes(x=q, y=value, color=Correction, lty=Correction)) ->
-  ggRMSE_Elnorm300_1000
-gg_legend <- get_legend(ggRMSE_Elnorm300_1000)  
-
-# Geometric
-RMSE <- tibble(q=q.seq)
-for (Correction in Corrections) {
-  RMSE <- add_column(
-    RMSE, 
-    "{Correction}" :=  as.numeric(
-      eval(as.name(paste("Egeom300_1000", Correction, sep="")))$RMSE
-      )
-  )
-}
-RMSE %>% 
-  pivot_longer(!q, names_to = "Correction", values_to = "value") %>% 
-  ggplot()+
-  geom_line(aes(x=q, y=value, color=Correction, lty=Correction)) ->
-  ggRMSE_Egeom300_1000
+ggRMSE("p_lnorm300", legend.position = "right") %>% 
+  get_legend() ->
+  gg_legend
+  
 grid.arrange(
-  ggRMSE_Elnorm300_1000 + theme(legend.position = "none") + labs(tag = "a"), 
-  ggRMSE_Egeom300_1000 + theme(legend.position = "none") + labs(tag = "b"),
-  gg_legend, 
-  nrow = 1, 
-  widths=c(0.4, 0.4, 0.2))
+  gg_p_lnorm300 + labs(tag = "a"),
+  gg_p_geom300 + labs(tag = "b"), 
+  gg_legend,
+  nrow = 1
+)
 ```
+
+Estimated relative RMSE of the estimators of diversity based on `r n_simulations` samples of `r sample_size` individuals of each typical distribution: log-normal (a) and geometric (b) of 300 species.
+The RMSE is normalized by the actual diversity.
+It is quite high for low orders of diversity, especially for the geometric distribution.
+Values of $q$ over 0.6 are not shown because all estimators perform similarly well.
+The legend lists the estimators in the increasing order of RMSE for $q>0.1$, where the estimator with the lowest RMSE is the jackknife-unveiled one, closely followed by the iChao-unveiled and Chao-Jost.
+Close to $q=0$, the jackknife-unveiled estimator has a higher variance making it the least reliable estimator.
+:::
 
 The discussion will focus on the best two estimators: Chao-Jost and jackknife-unveiled, ignoring the iChao-unveiled estimator which takes place between them but is too similar to the jackknife-unveiled to bring decisive arguments for the discussion.
 Figure \@ref(fig:Profiles) shows their profiles for a 1000-individual sample of a log-normal distribution of 300 species, with their confidence intervals.
