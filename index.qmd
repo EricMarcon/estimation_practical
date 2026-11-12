@@ -78,9 +78,12 @@ packages_required <- c(
   # Add specific packages here
   "cowplot",
   "divent", 
+  "doFuture",
   "gridExtra", 
   "lmodel2",
-  "tidyverse"
+  "progressr",
+  "tidyverse",
+  "vegan"
 )
 # Already installed?
 packages_installed <- vapply(
@@ -405,8 +408,8 @@ The correct process consists of evaluating entropy with its confidence interval 
 ```{r}
 #| label: parameters
 distributions <- c("lnorm", "geom")
-richnesses <- 300                 # c(300, 600)
-sample_sizes <- 1000              # c(200, 500, 1000, 5000)
+richnesses <- 300
+sample_sizes <- 1000
 estimators <- c(
   "UnveilJ", 
   "UnveiliC", 
@@ -423,7 +426,7 @@ orders <- c(
   0.15, 
   seq(from = 0.2, to = 0.6, by = 0.1)
 )
-n_simulations <- 10               # 1000
+n_simulations <- 10#00
 alpha <- 0.05
 # log-normal distributions: sd similar to BCI
 sd_lnorm  <- 1.8
@@ -516,6 +519,7 @@ Sample sizes are between 200 and 5000 individuals to cover a range from obvious 
 ::: {#fig-C_all fig-env="figure*"}
 ```{r}
 #| label: C_all
+ggtheme_set()
 # Compare estimated and actual sample coverages
 ggC <- function(probabilities, sizes) {
   prob <- as.numeric(probabilities)
@@ -568,7 +572,6 @@ A model II linear regression [@Legendre2014] validates the accuracy of the estim
 
 ## Entropy and diversity
 
-
 The root mean square error of the estimators is shown on figure \@ref(fig:RMSE) for the log-normal and the geometric distributions with 300 species when 1000 individuals are sampled, a typical tropical forest inventory of trees.
 
 Unsurprisingly, the plug-in estimator is severely biased and has the poorest results in the tests.
@@ -589,7 +592,7 @@ The RMSE varies a lot according to the model.
 ::: {#fig-RMSE fig-env="figure*"}
 ```{r}
 #| label: RMSE
-
+ggtheme_set()
 library("doFuture")
 # Create a progressor
 library("progressr")
@@ -600,18 +603,18 @@ library("progressr")
 # List all probabilities created above
 ls() %>% 
   subset(str_starts(., "p_")) ->
-  distributions
+  distribution_vars
 
 # Prepare the output of the loop
 RMSE <- array(
   0, 
   dim = c(
-    length(distributions),
+    length(distribution_vars),
     length(estimators),
     length(orders)
   ),
   dimnames = list(
-    Distribution = distributions,
+    Distribution = distribution_vars,
     Estimator = estimators,
     Order = orders
   )
@@ -620,9 +623,9 @@ RMSE <- array(
 # Sample size
 sample_size <- 1000
 
-for (distribution in distributions) {
+for (distribution_var in distribution_vars) {
   # Pick a probability distribution
-  distribution %>% 
+  distribution_var %>% 
     as.name() %>% 
     eval() ->
     the_probability
@@ -693,9 +696,9 @@ RMSE %>%
   RMSE.tibble
 
 # Plots
-ggRMSE <- function(distribution, legend.position = "none") {
+ggRMSE <- function(distribution_var, legend.position = "none") {
   RMSE.tibble %>% 
-    filter(Distribution == distribution) %>% 
+    dplyr::filter(Distribution == distribution_var) %>% 
     ggplot() +
     geom_line(aes(x = Order, y = RMSE, color = Estimator, lty = Estimator)) +
     theme(legend.position = legend.position)
@@ -729,33 +732,43 @@ Close to $q=0$, the jackknife-unveiled estimator has a higher variance making it
 The discussion will focus on the best two estimators: Chao-Jost and jackknife-unveiled, ignoring the iChao-unveiled estimator which takes place between them but is too similar to the jackknife-unveiled to bring decisive arguments for the discussion.
 Figure \@ref(fig:Profiles) shows their profiles for a 1000-individual sample of a log-normal distribution of 300 species, with their confidence intervals.
 
-(ref:Profiles) Diversity profiles estimated from 1000 random samples of 1000 individuals from a log-normal community of 300 species. The black line represents the real diversity (starting from $^{0}{D} \approx 300$). The jackknife-unveiled estimator is plotted by the red line ($^{0}{\hat{D}} \approx 250$). Its confidence interval (red shade) is very wide. The Chao-Jost estimator (blue line: $^{0}{\hat{D}} \approx 200$) is more biased downward but its confidence interval (blue shade) is much smaller.
+::: {#fig-profiles}
+```{r}
+#| label: profiles
+ggtheme_set()
+# Actual diversities
+the_probabilities <- bind_rows(p_lnorm300, p_geom300)
 
-```{r Profiles, fig.cap="(ref:Profiles)"}
-profile_ChaoJost <- tibble(
-  q=Elnorm300_1000ChaoJost$x, 
-  diversity=Elnorm300_1000ChaoJost$y,
-  diversity_low=Elnorm300_1000ChaoJost$low,
-  diversity_high=Elnorm300_1000ChaoJost$high,
+the_communities <- bind_rows(
+  (
+    rcommunity(1, size = 1000, prob = as.numeric(the_probabilities[1,])) %>% 
+    mutate(site = "lnorm")
+  ),
+  (
+    rcommunity(1, size = 1000, prob = as.numeric(the_probabilities[2,])) %>% 
+    mutate(site = "geom")
   )
-profile_UnveilJ <- tibble(
-  q=Elnorm300_1000UnveilJ$x, 
-  diversity=Elnorm300_1000UnveilJ$y,
-  diversity_low=Elnorm300_1000UnveilJ$low,
-  diversity_high=Elnorm300_1000UnveilJ$high,
-  )
-profile_real <- tibble(
-  q=Elnorm300_1000UnveilJ$x, 
-  diversity=Elnorm300_1000ChaoJost$Real)
+)
 
-ggplot() +
-  geom_line(data=profile_ChaoJost, mapping=aes(x=q, y=diversity), col="blue") +
-  geom_line(data=profile_ChaoJost, mapping=aes(x=q, y=diversity), col="blue") +
-  geom_ribbon(data=profile_ChaoJost, mapping=aes(x=q, ymin=diversity_low, ymax=diversity_high), alpha=0.2, fill="blue") +
-  geom_line(data=profile_UnveilJ, mapping=aes(x=q, y=diversity), col="red") +
-  geom_ribbon(data=profile_UnveilJ, mapping=aes(x=q, ymin=diversity_low, ymax=diversity_high), alpha=0.2, fill="red") +
-  geom_line(data=profile_real, mapping=aes(x=q, y=diversity), col="black")
+the_communities %>% 
+  profile_hill(
+    orders = orders,
+    n_simulations = n_simulations
+  ) %>% 
+  bind_rows(
+    profile_hill(
+      the_probabilities, orders = orders,
+    )
+  ) %>% 
+  autoplot()
 ```
+
+Diversity profiles estimated from 1000 random samples of 1000 individuals from a log-normal community of 300 species.
+The black line represents the real diversity (starting from $^{0}{D} \approx 300$).
+The jackknife-unveiled estimator is plotted by the red line ($^{0}{\hat{D}} \approx 250$).
+Its confidence interval (red shade) is very wide.
+The Chao-Jost estimator (blue line: $^{0}{\hat{D}} \approx 200$) is more biased downward but its confidence interval (blue shade) is much smaller.
+:::
 
 # Discussion
 
@@ -812,16 +825,43 @@ So, the estimators presented here may not be far from the optimum trade-off (les
 
 # Application to real data
 
-(ref:BCIProfile) Estimated diversity profile of the tree species of the BCI 50-ha plot. The shaded area is the 95% confidence interval of the estimation.
-
-```{r BCIProfile, fig.cap="(ref:BCIProfile)"}
+::: {#fig-real_profiles fig-env="figure*"}
+```{r}
+#| label: real_profiles
+ggtheme_set()
 library("vegan")
 data(BCI)
-NsBCI <- as.AbdVector(colSums(BCI))
-# Diversity profile
-DPBCI <- CommunityProfile(Diversity, NsBCI, NumberOfSimulations = 100, Alpha=Alpha)
-autoplot(DPBCI)
+BCI %>% 
+  colSums() %>% 
+  profile_hill(
+    orders = orders,
+    n_simulations = n_simulations
+  ) %>% 
+  autoplot() +
+  theme(legend.position = "none") ->
+  gg_BCI
+paracou_6_abd %>% 
+  dplyr::filter(site == "subplot_1") %>% 
+  profile_hill(
+    orders = orders,
+    n_simulations = n_simulations
+  ) %>% 
+  autoplot() +
+  theme(legend.position = "none") ->
+  gg_paracou
+
+grid.arrange(
+  gg_BCI  + labs(tag = "a"),
+  gg_paracou + labs(tag = "b"), 
+  nrow = 1
+)
 ```
+
+Estimated diversity profile of the tree species of the BCI 50-ha plot.
+The shaded area is the 95% confidence interval of the estimation.
+Estimated diversity profiles of the tree species of the Paracou 1-ha plot #18.
+The shaded zone is the 95% confidence interval of the estimation.
+:::
 
 The diversity of two real forest plots is estimated now.
 The first case is Barro Colorado Island's 50-ha plot of tropical forest, whose inventory data of trees over 10\~cm diameter at breast height are available in the package *vegan* [@Oksanen2012] for R.
@@ -833,14 +873,6 @@ This is an unusually large dataset, whose diversity estimation (Figure \@ref(fig
 The best estimator is Chao-Jost since the Chao1 estimator is appropriate for the number of species.
 The 95% confidence interval of the estimation is built by resampling according to the technique by @Chao2015.
 It is very small due to the abundance of data.
-
-(ref:P18Profile) Estimated diversity profiles of the tree species of the Paracou 1-ha plot #18. The shaded zone is the 95% confidence interval of the estimation.
-
-```{r P18Profile, fig.cap="(ref:P18Profile)"}
-NsP18 <- as.AbdVector(Paracou618.MC$Nsi[, 2])
-DPP18 <- CommunityProfile(Diversity, NsP18, Correction="UnveilJ", NumberOfSimulations = 1000, Alpha=Alpha)
-autoplot(DPP18)
-```
 
 The second example takes place at the other extreme of sampling intensity.
 A 1-ha plot (plot 18) of tropical forest in the experimental forest of Paracou, French Guiana [@Gourlet-Fleury2004], was inventoried.
