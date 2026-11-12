@@ -3,6 +3,7 @@
 .Rhistory
 .RData
 .Ruserdata
+.Rprofile
 
 # Mac OS
 .DS_Store
